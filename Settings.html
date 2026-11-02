@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Параметры печати</title><link rel="stylesheet" href="../App.css"><script src="https://telegram.org/js/telegram-web-app.js"></script></head>
+<body><main>
+<h1>Параметры</h1>
+<label>Файл</label><select id="file"></select>
+<label class="chk"><input type="checkbox" id="all"> Применить для всех файлов</label>
+<label>Тип печати</label><select id="duplex"><option value="0">Односторонняя</option><option value="1">Двусторонняя</option></select>
+<label>Цвет</label><select id="color"><option value="0">Чёрно-белая</option><option value="1">Цветная</option></select>
+<label>Количество копий</label><input id="copies" type="number" min="1" max="100" value="1" inputmode="numeric">
+<label>Бумага</label><select id="paper"><option>Обычная 80 г</option><option>Плотная 120 г</option></select>
+<label>Размер</label><select id="size"><option value="0">A4</option><option value="1">A5</option><option value="2">A6</option></select>
+<label>Куда</label><select id="place"><option value="">Выберите…</option><option value="block">НВК, общежитие</option><option value="campus">Кампус (аудитория, корпус)</option></select>
+<div id="addr" hidden>
+  <div id="blockWrap"><label>Блок</label><select id="block"></select></div>
+  <label>Этаж</label><input id="floor" type="number" min="1" max="30" inputmode="numeric">
+  <label id="roomLabel">Комната</label><input id="room" maxlength="40">
+</div>
+<label>Время</label><select id="time"><option>Как можно скорее</option><option>Сегодня вечером</option><option>Завтра утром</option><option>Завтра днём</option></select>
+<label>Комментарий курьеру</label><input id="comment" maxlength="300" placeholder="необязательно">
+<div class="box" id="total">Укажите, куда доставить</div>
+<button class="btn primary" id="pay" disabled>Оплатить</button>
+</main>
+<script src="../App.js"></script>
+<script>
+back('../InfoForUser/MainPage.html');
+const d = draft.get(), files = d.files.filter(f => f.status === 'loaded' && f.selected);
+if (!files.length) go('../InfoForUser/MainPage.html');
+const DEF = { duplex: '0', color: '0', copies: '1', paper: 'Обычная 80 г', size: '0' }, KEYS = Object.keys(DEF);
+const cfg = {}; files.forEach(f => cfg[f.id] = Object.assign({}, DEF));
+['1', '2', '3', '4', '5', 'J', 'K', 'I', 'H', 'G', 'F', 'E', 'D'].forEach(b => $('block').append(new Option(b, b)));
+files.forEach(f => $('file').append(new Option(f.name + ' (' + f.pages + ' стр.)', f.id)));
+const cur = () => cfg[$('file').value];
+function load() { KEYS.forEach(k => $(k).value = cur()[k]); }
+function applyField(k) { (($('all').checked) ? files.map(f => cfg[f.id]) : [cur()]).forEach(c => c[k] = $(k).value); }
+KEYS.forEach(k => $(k).addEventListener('input', () => { applyField(k); quote(); }));
+$('file').addEventListener('change', load);
+$('all').addEventListener('change', () => { if ($('all').checked) KEYS.forEach(applyField); quote(); });
+$('place').addEventListener('change', () => {
+    $('addr').hidden = !$('place').value;
+    $('blockWrap').hidden = $('place').value !== 'block';
+    $('roomLabel').textContent = $('place').value === 'block' ? 'Комната' : 'Аудитория или место';
+    quote();
+});
+['block', 'floor', 'room'].forEach(i => $(i).addEventListener('input', quote));
+function payload() {
+    return {
+        place: $('place').value, block: $('block').value, floor: +$('floor').value, room: $('room').value,
+        time_slot: $('time').value, comment: $('comment').value,
+        items: files.map(f => { const c = cfg[f.id]; return { file_id: f.id, copies: +c.copies, color: c.color === '1', duplex: c.duplex === '1', size_steps: +c.size, paper: c.paper }; })
+    };
+}
+let timer;
+function quote() {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+        try {
+            const r = await api('/quote', { json: payload() });
+            $('total').className = 'box'; $('total').textContent = 'Печать ' + r.printing + ' ₽ + доставка ' + r.delivery + ' ₽ = ' + r.total + ' ₽'; $('pay').disabled = false;
+        } catch (e) { $('total').className = 'box hint'; $('total').textContent = e.message; $('pay').disabled = true; }
+    }, 250);
+}
+$('pay').addEventListener('click', async () => {
+    $('pay').disabled = true;
+    try {
+        const r = await api('/orders', { json: payload() });
+        const used = new Set(files.map(f => f.id));
+        d.files = d.files.filter(f => !used.has(f.id)); draft.set(d);
+        go('Payment.html?order=' + encodeURIComponent(r.number));
+    } catch (e) { $('total').className = 'box err'; $('total').textContent = e.message; $('pay').disabled = false; }
+});
+load(); quote();
+</script></body></html>
